@@ -1,0 +1,7 @@
+Flask==2.2.5
+google-cloud-storage==2.9.0
+google-cloud-bigquery==3.10.0
+openpyxl
+pandas
+db-dtypes
+flask-cors==3.0.10
