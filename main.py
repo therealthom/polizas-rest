@@ -1,13 +1,14 @@
 import io
 import os
 import tempfile
-from google.cloud import storage
-from google.cloud import bigquery
 from flask import Flask, request, jsonify, make_response
 import requests
 from flask_cors import CORS
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from google.cloud import storage, bigquery
+from openpyxl import load_workbook
+from flask import Flask, send_file
 
 
 app = Flask(__name__)
@@ -157,6 +158,55 @@ def listar_archivos():
         return jsonify({'archivos': pdf_files}), 200
     except Exception as e:
         return jsonify({'mensaje': 'Error al obtener la lista de archivos: ' + str(e)}), 500
+
+
+@app.route('/modify-excel', methods=['GET'])
+def modify_excel():
+    # Get environment variables
+    bucket_name = "testing-polizas"
+    blob_name = "plantilla-poliza-egreso.xlsx"
+    dataset_id = "polizas"
+    table_id = "poliza_egreso"
+    project_id = "demoasf"
+
+    # Initialize a Google Cloud Storage client
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+
+    # Download the XLSX file from GCS to local storage
+    blob.download_to_filename('/tmp/input.xlsx')
+
+    # Initialize a BigQuery client
+    bigquery_client = bigquery.Client()
+    table = bigquery_client.dataset(dataset_id).table(table_id)
+
+    # Fetch data from BigQuery
+    query = f'SELECT * FROM `{project_id}.{dataset_id}.{table_id}`'
+    query_job = bigquery_client.query(query)
+    results = query_job.result()
+
+    # Load the workbook and select the active sheet
+    wb = load_workbook('/tmp/input.xlsx')
+    ws = wb.active
+
+    # Find the first empty row in the sheet
+    first_empty_row = next((i for i, row in enumerate(ws.iter_rows(), start=1) if all(cell.value is None for cell in row)), None)
+
+    # Modify the XLSX file with the fetched data
+    for row in results:
+        for col_num, value in enumerate(row, start=1):
+            ws.cell(row=first_empty_row, column=col_num, value=value)
+        first_empty_row += 1
+
+    # Save the modified XLSX file
+    wb.save('/tmp/output.xlsx')
+
+    # Upload the modified XLSX file back to GCS
+    blob.upload_from_filename('/tmp/output.xlsx')
+
+    # Return the XLSX file for download
+    return send_file('/tmp/output.xlsx', as_attachment=True)
 
 
 if __name__ == '__main__':
